@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>KnightonMths</title>
+
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+<style>
+body { font-family: Arial; background:white; text-align:center; }
+.hidden { display:none; }
+
+.card {
+  background:#f3f3f3;
+  padding:15px;
+  margin:10px auto;
+  width:360px;
+  border-radius:10px;
+}
+
+button {
+  padding:10px;
+  margin:5px;
+  border:none;
+  border-radius:8px;
+  background:#4CAF50;
+  color:white;
+}
+
+input, select { padding:8px; margin:5px; }
+
+.correct { background:lightgreen; }
+.wrong { background:#ffaaaa; }
+</style>
+</head>
+
+<body>
+
+<h1>KnightonMths</h1>
+
+<!-- HOME -->
+<div id="home">
+  <button onclick="show('login')">Login</button>
+  <button onclick="show('signup')">Sign Up</button>
+</div>
+
+<!-- SIGNUP -->
+<div id="signup" class="hidden">
+  <input id="emailSignup" placeholder="Email"><br>
+  <input id="passSignup" type="password"><br>
+
+  <select id="role">
+    <option value="student">Student</option>
+    <option value="teacher">Teacher</option>
+  </select><br>
+
+  <button onclick="signup()">Create</button>
+</div>
+
+<!-- LOGIN -->
+<div id="login" class="hidden">
+  <input id="emailLogin" placeholder="Email"><br>
+  <input id="passLogin" type="password"><br>
+
+  <button onclick="login()">Login</button>
+</div>
+
+<!-- MODE -->
+<div id="mode" class="hidden">
+  <h3>Choose Mode</h3>
+  <button onclick="setMode('homeMode')">Home</button>
+  <button onclick="setMode('schoolMode')">School</button>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dashboard" class="hidden">
+
+  <div class="card">
+    <p id="stats"></p>
+  </div>
+
+  <div class="card">
+    <h3>Year Level (Home Mode)</h3>
+
+    <select id="year">
+      <option value="0">Year 0</option>
+      <option value="1">Year 1</option>
+      <option value="2">Year 2</option>
+      <option value="3">Year 3</option>
+      <option value="4">Year 4</option>
+      <option value="5">Year 5</option>
+      <option value="6">Year 6</option>
+    </select>
+  </div>
+
+  <div id="teacherPanel" class="hidden card"></div>
+  <div id="studentPanel" class="hidden card"></div>
+
+  <button onclick="startHomeGame()">Start Home Practice</button>
+  <button onclick="logout()">Logout</button>
+</div>
+
+<!-- GAME -->
+<div id="game" class="hidden">
+  <div id="questions"></div>
+  <button onclick="submitGame()">Submit</button>
+</div>
+
+<script>
+
+// 🔥 FIREBASE
+const firebaseConfig = {
+  apiKey: "AIzaSyBdUuLURlJJ-e-6a3PLn6cH4RxJ0Avlkho",
+  authDomain: "maths-ca328.firebaseapp.com",
+  projectId: "maths-ca328",
+  appId: "1:58975960965:web:f82598477fa8ae3ee24eec"
+};
+
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+
+let currentUser;
+let mode = "homeMode";
+let answers = [];
+let activeAssignment = null;
+
+// NAV
+function show(id){
+  ["home","signup","login","mode","dashboard","game"].forEach(s=>{
+    document.getElementById(s).classList.add("hidden");
+  });
+  document.getElementById(id).classList.remove("hidden");
+}
+
+// SIGNUP
+async function signup(){
+  let res = await auth.createUserWithEmailAndPassword(emailSignup.value, passSignup.value);
+  currentUser = res.user;
+
+  await db.collection("users").doc(currentUser.uid).set({
+    email: currentUser.email,
+    role: role.value
+  });
+
+  show("mode");
+}
+
+// LOGIN
+async function login(){
+  let res = await auth.signInWithEmailAndPassword(emailLogin.value, passLogin.value);
+  currentUser = res.user;
+
+  show("mode");
+}
+
+// MODE
+function setMode(m){
+  mode = m;
+  loadDashboard();
+}
+
+// DASHBOARD
+async function loadDashboard(){
+  show("dashboard");
+
+  let doc = await db.collection("users").doc(currentUser.uid).get();
+  let user = doc.data();
+
+  stats.innerText = `${user.email} (${user.role})`;
+
+  if(mode === "schoolMode"){
+    loadSchool();
+  }
+}
+
+// SCHOOL MODE
+async function loadSchool(){
+  studentPanel.classList.remove("hidden");
+
+  studentPanel.innerHTML = "<h3>Assignments</h3>";
+
+  let snap = await db.collection("assignments").get();
+
+  snap.forEach(doc=>{
+    let a = doc.data();
+
+    studentPanel.innerHTML += `
+      <div class="card">
+        <p>${a.title} (Year ${a.year})</p>
+        <button onclick="startAssignment('${doc.id}')">Start</button>
+      </div>
+    `;
+  });
+}
+
+// HOME MODE GAME
+function startHomeGame(){
+  show("game");
+
+  answers = [];
+  questions.innerHTML = "";
+
+  let year = parseInt(document.getElementById("year").value);
+
+  let max = (year+1)*10;
+
+  for(let i=0;i<6;i++){
+    let a = Math.floor(Math.random()*max)+1;
+    let b = Math.floor(Math.random()*max)+1;
+
+    answers.push(a+b);
+
+    // IMPORTANT: NO answer shown, only question
+    questions.innerHTML += `${a} + ${b} = <input id="q${i}" autocomplete="off"><br>`;
+  }
+}
+
+// SCHOOL ASSIGNMENT GAME
+async function startAssignment(id){
+  activeAssignment = id;
+  show("game");
+
+  answers = [];
+  questions.innerHTML = "";
+
+  let a = await db.collection("assignments").doc(id).get();
+  let data = a.data();
+
+  let max = (data.year+1)*10;
+
+  for(let i=0;i<6;i++){
+    let x = Math.floor(Math.random()*max)+1;
+    let y = Math.floor(Math.random()*max)+1;
+
+    answers.push(x+y);
+
+    questions.innerHTML += `${x} + ${y} = <input id="q${i}" autocomplete="off"><br>`;
+  }
+}
+
+// SUBMIT (NO ANSWERS SHOWN EVER)
+async function submitGame(){
+  let correct = 0;
+
+  answers.forEach((ans,i)=>{
+    let val = parseInt(document.getElementById("q"+i).value);
+    if(val === ans) correct++;
+  });
+
+  if(mode === "schoolMode"){
+    await db.collection("results").add({
+      user: currentUser.uid,
+      assignment: activeAssignment,
+      score: correct,
+      time: Date.now()
+    });
+  }
+
+  loadDashboard();
+}
+
+// LOGOUT
+function logout(){
+  auth.signOut();
+  show("home");
+}
+
+show("home");
+
+</script>
+
+</body>
+</html>
